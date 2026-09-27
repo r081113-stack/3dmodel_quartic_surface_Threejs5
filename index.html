@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Surface - z = x⁴ + y⁴ - 2(x-y)²</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #f9f9fb; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+    #container { position: relative; width: 90vw; height: 85vh; background: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; display: flex; flex-direction: column; }
+    #canvas-container { flex: 1; width: 100%; height: 100%; }
+    .info-bar { display: flex; justify-content: center; align-items: center; gap: 30px; padding: 12px; background: #ffffff; border-top: 1px solid #f0f0f0; border-bottom: 1px solid #f0f0f0; }
+    .info-item { text-align: center; }
+    .info-label { font-size: 11px; color: #888; font-weight: 600; letter-spacing: 1px; margin-bottom: 4px; }
+    .info-val { font-size: 15px; font-weight: bold; color: #222; }
+    .control-panel { display: flex; justify-content: center; align-items: center; gap: 30px; padding: 12px; background: #ffffff; }
+    .control-group { display: flex; align-items: center; gap: 12px; }
+    .control-label { font-size: 14px; color: #444; font-weight: 500; }
+    input[type="range"] { width: 120px; accent-color: #222; }
+    .num-box { background: #f4f4f6; padding: 6px 16px; border-radius: 8px; font-size: 14px; font-weight: bold; color: #333; }
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .3s; border-radius: 24px; }
+    .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: #222; }
+    input:checked + .slider:before { transform: translateX(20px); }
+    .legend { display: flex; gap: 15px; font-size: 12px; font-weight: bold; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .color-box { width: 12px; height: 12px; border-radius: 3px; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+<div id="container">
+  <div id="canvas-container"></div>
+  <div class="info-bar">
+    <div class="info-item">
+      <div class="info-label">FUNCTION</div>
+      <div class="info-val">z = x⁴ + y⁴ - 2(x-y)²</div>
+    </div>
+    <div style="width: 1px; height: 24px; background: #eee;"></div>
+    <div class="legend">
+      <div class="legend-item"><div class="color-box" style="background: #ff0000;"></div> y = x</div>
+      <div class="legend-item"><div class="color-box" style="background: #0000ff;"></div> y = -x</div>
+    </div>
+  </div>
+  <div class="control-panel">
+    <div class="control-group">
+      <span class="control-label">Grid Resolution</span>
+      <input type="range" id="resolution-slider" min="10" max="80" value="30">
+      <span class="num-box" id="res-val-box">30</span>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Show Wireframe</span>
+      <label class="switch">
+        <input type="checkbox" id="wireframe-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+</div>
+
+<script>
+  const container = document.getElementById('canvas-container');
+  let scene, camera, renderer, controls, mesh, wireframeMesh;
+  const config = { domainX: [-1.8, 1.8], domainY: [-1.8, 1.8], zMin: -2, zMax: 10 };
+
+  function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(4, 5, 6);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(5, 10, 7);
+    scene.add(dirLight);
+
+    addHelpers();
+    addCurveLines();
+    updateSurface();
+
+    window.addEventListener('resize', onWindowResize);
+    setupUI();
+    animate();
+  }
+
+  function addHelpers() {
+    const axesHelper = new THREE.AxesHelper(2.5);
+    const colors = axesHelper.geometry.attributes.color;
+    for (let i = 0; i < colors.count; i++) {
+      colors.setXYZ(i, 0, 0, 0); // 3軸を黒色に設定
+    }
+    colors.needsUpdate = true;
+    scene.add(axesHelper);
+
+    const grid = new THREE.GridHelper(4, 10, 0xdddddd, 0xeeeeee);
+    grid.position.y = -2.0;
+    scene.add(grid);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'Bold 28px sans-serif'; ctx.fillStyle = '#ff8c00'; ctx.fillText('(0,0,0)', 10, 40);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
+    sprite.position.set(0.2, 0.3, 0); sprite.scale.set(1.2, 0.6, 1);
+    scene.add(sprite);
+  }
+
+  function addCurveLines() {
+    // 1. 赤線：y = x
+    const pts1_3d = [], pts1_xy = [], pts1_bottom = [];
+    for (let t = -1.8; t <= 1.8; t += 0.02) {
+      const z = Math.pow(t, 4) + Math.pow(t, 4) - 2 * Math.pow(t - t, 2); // z = 2t^4
+      pts1_3d.push(new THREE.Vector3(t, z + 0.02, t));     // 曲面上
+      pts1_xy.push(new THREE.Vector3(t, 0.0, t));          // xy平面上 (z = 0)
+      pts1_bottom.push(new THREE.Vector3(t, -2.0, t));      // 最下部グリッド面 (z = -2.0)
+    }
+    createLine(pts1_3d, 0xff0000, 3, false);
+    createLine(pts1_xy, 0xff0000, 2, true);
+    createLine(pts1_bottom, 0xff0000, 1.5, true);
+
+    // 2. 青線：y = -x
+    const pts2_3d = [], pts2_xy = [], pts2_bottom = [];
+    for (let t = -1.8; t <= 1.8; t += 0.02) {
+      const z = Math.pow(t, 4) + Math.pow(-t, 4) - 2 * Math.pow(t - (-t), 2); // z = 2t^4 - 8t^2
+      pts2_3d.push(new THREE.Vector3(t, z + 0.02, -t));    // 曲面上
+      pts2_xy.push(new THREE.Vector3(t, 0.0, -t));         // xy平面上 (z = 0)
+      pts2_bottom.push(new THREE.Vector3(t, -2.0, -t));     // 最下部グリッド面 (z = -2.0)
+    }
+    createLine(pts2_3d, 0x0000ff, 3, false);
+    createLine(pts2_xy, 0x0000ff, 2, true);
+    createLine(pts2_bottom, 0x0000ff, 1.5, true);
+  }
+
+  function createLine(points, color, linewidth, isDashed = false) {
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    let material;
+    if (isDashed) {
+      material = new THREE.LineDashedMaterial({ color: color, linewidth: linewidth, scale: 1, dashSize: 0.1, gapSize: 0.05 });
+    } else {
+      material = new THREE.LineBasicMaterial({ color: color, linewidth: linewidth });
+    }
+    const line = new THREE.Line(geometry, material);
+    if (isDashed) line.computeLineDistances();
+    scene.add(line);
+  }
+
+  function buildSurface(segments, showWireframe) {
+    if (mesh) scene.remove(mesh);
+    if (wireframeMesh) scene.remove(wireframeMesh);
+
+    const width = config.domainX[1] - config.domainX[0];
+    const height = config.domainY[1] - config.domainY[0];
+    const geometry = new THREE.PlaneGeometry(width, height, segments, segments);
+    geometry.rotateX(-Math.PI / 2);
+
+    const pos = geometry.attributes.position;
+    const colors = [];
+
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getZ(i);
+      const z = Math.pow(x, 4) + Math.pow(y, 4) - 2 * Math.pow(x - y, 2);
+      pos.setY(i, z);
+
+      const norm = (z - config.zMin) / (config.zMax - config.zMin);
+      const hue = (1 - Math.max(0, Math.min(1, norm))) * 0.7;
+      const c = new THREE.Color().setHSL(hue, 1.0, 0.5);
+      colors.push(c.r, c.g, c.b);
+    }
+
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+
+    mesh = new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide, shininess: 40 }));
+    scene.add(mesh);
+
+    if (showWireframe) {
+      wireframeMesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x333333, wireframe: true, transparent: true, opacity: 0.3 }));
+      scene.add(wireframeMesh);
+    }
+  }
+
+  function updateSurface() {
+    const segments = parseInt(document.getElementById('resolution-slider').value);
+    buildSurface(segments, document.getElementById('wireframe-toggle').checked);
+  }
+
+  function setupUI() {
+    const slider = document.getElementById('resolution-slider');
+    slider.addEventListener('input', () => {
+      document.getElementById('res-val-box').textContent = slider.value;
+      updateSurface();
+    });
+    document.getElementById('wireframe-toggle').addEventListener('change', updateSurface);
+  }
+
+  function onWindowResize() {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  init();
+</script>
+
+</body>
+</html>
