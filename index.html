@@ -236,6 +236,25 @@
       color: #cfcfd6;
       line-height: 1.8;
     }
+    .plot-title {
+      font-size: 0.76rem;
+      color: #d4d4d8;
+      margin: 8px 0 3px;
+    }
+    .plot-canvas {
+      width: 100%;
+      height: 84px;
+      display: block;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(0,0,0,0.3);
+    }
+    .plot-note {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      margin-top: 3px;
+    }
+    .step-group.wide { grid-template-columns: 1fr 1fr 1fr; }
   </style>
 </head>
 <body>
@@ -252,22 +271,27 @@
     </div>
 
     <div class="section-title">解答のステップ</div>
-    <div class="step-group">
-      <button class="step-btn active" id="step-1">① 停留点</button>
-      <button class="step-btn" id="step-2">② $A,B,C$</button>
-      <button class="step-btn" id="step-3">③ 定義で判定</button>
-    </div>
+    <div class="step-group wide" id="step-group"></div>
     <div class="step-card" id="step-card"></div>
+    <div id="plots"></div>
 
     <div id="stat-wrap">
       <div class="section-title">着目する停留点</div>
       <div class="step-group" id="stat-group"></div>
     </div>
 
-    <div class="section-title">原点への近づけ方（③）</div>
-    <div class="control-group">
-      <label><span>$x$ の値:</span><span id="val-x"></span></label>
+    <div class="section-title">動かす・拡大する</div>
+    <div class="control-group" id="grp-x">
+      <label><span>$x$ の値（点 $Q_\pm$ と近傍の円）:</span><span id="val-x"></span></label>
       <input type="range" id="slider-x" min="0.05" max="1.9" step="0.05" value="1.0">
+    </div>
+    <div class="control-group" id="grp-phi">
+      <label><span>直線の向き $\varphi$:</span><span id="val-phi"></span></label>
+      <input type="range" id="slider-phi" min="0" max="175" step="5" value="40">
+    </div>
+    <div class="control-group" id="grp-zoom">
+      <label><span>原点の近くを拡大:</span><span id="val-zoom"></span></label>
+      <input type="range" id="slider-zoom" min="0" max="100" step="1" value="0">
     </div>
 
     <div class="section-title">計算結果</div>
@@ -278,9 +302,9 @@
       <button class="toggle-btn" id="btn-fx"><span class="dot" style="background:#ef4444"></span>$f_x=0$</button>
       <button class="toggle-btn" id="btn-fy"><span class="dot" style="background:#10b981"></span>$f_y=0$</button>
       <button class="toggle-btn" id="btn-zero"><span class="dot" style="background:#e5e7eb"></span>$f=0$</button>
-      <button class="toggle-btn" id="btn-ref"><span class="dot" style="background:#9ca3af"></span>基準面</button>
-      <button class="toggle-btn" id="btn-paths"><span class="dot" style="background:#34d399"></span>切り口</button>
-      <button class="toggle-btn" id="btn-nbhd"><span class="dot" style="background:#f87171"></span>近傍と $Q_\pm$</button>
+      <button class="toggle-btn" id="btn-ref"><span class="dot" style="background:#9ca3af"></span>領域図</button>
+      <button class="toggle-btn" id="btn-sec"><span class="dot" style="background:#34d399"></span>切り口</button>
+      <button class="toggle-btn" id="btn-q"><span class="dot" style="background:#f87171"></span>近傍と $Q_\pm$</button>
       <button class="toggle-btn" id="btn-sign" style="grid-column: span 3;"><span class="dot" style="background:#a855f7"></span>曲面を $f(x,y)-f(0,0)$ の符号で色分け</button>
     </div>
     <div class="legend">
@@ -317,6 +341,18 @@
       }
       return String(parseFloat(v.toFixed(4)));
     }
+    function badge(cls, text) { return '<span class="badge ' + cls + '">' + text + '</span>'; }
+
+    /* ---------- 状態（CFG の関数から参照される） ---------- */
+    const state = {
+      step: 0,
+      sel: 0,
+      x: 1.0,
+      phiDeg: 40,
+      zoomV: 0,
+      zoom: 1,
+      show: { fx: false, fy: false, zero: false, ref: false, qp: false, qm: false, circle: false, sign: 'off', sec: [] }
+    };
 
     /* ---------- 問題ごとの設定 ---------- */
     const CFG = {
@@ -327,7 +363,7 @@
       fxy: (x, y) => -4,
       fyy: (x, y) => 12 * y * y - 4,
       dom: { x0: -2.2, x1: 2.2, y0: -2.2, y1: 2.2 },
-      zs: 0.5, zcap: 7, delta: 0.8,
+      zs: 0.5, zcap: 7, zlo: -8.4, zhi: 7,
       axes: { x: [2.8, 2.8], y: [2.8, 2.8], z: [4.6, 4.4] },
       cam: { pos: [10.4, 6.0, 4.6], target: [0, -0.3, 0] },
       stat: [
@@ -336,7 +372,6 @@
         { x: 0, y: 0, coord: '(0,\\,0)', lab: '(0,\\,0)', btn: '(0,0)' }
       ],
       allTex: '(x,y)=(\\pm\\sqrt{2},\\mp\\sqrt{2}),\\ (0,0)',
-      // z=0 平面上の曲線（f_x=0, f_y=0, f=0）
       curvesFx: [{ fn: t => [t, t - t ** 3], t0: -1.55, t1: 1.55 }],
       curvesFy: [{ fn: t => [t - t ** 3, t], t0: -1.55, t1: 1.55 }],
       curvesZero: [{
@@ -353,43 +388,111 @@
         zero: [[0, 1.45, 'f=0']],
         ref: [1.7, -1.95]
       },
-      // 切り口：Q+ が動く経路 y=x と、Q- が動く経路 y=-x
-      paths: [
-        { fn: t => [t, t],  t0: -1.6, t1: 1.6, lab: 'y=x',  at: [1.3, 1.3] },
-        { fn: t => [t, -t], t0: -2.2, t1: 2.2, lab: 'y=-x', at: [-1.9, 1.9] }
+      // 原点を通る 2 本の直線 y=x（赤）と y=-x（緑）に沿った切り口
+      sections: [
+        { ang: Math.PI / 4,     color: 0xf87171, lab: 'y=x',  at: [1.3, 1.3] },
+        { ang: 3 * Math.PI / 4, color: 0x34d399, lab: 'y=-x', at: [-1.9, 1.9] }
       ],
+      hasPhi: false, phi0: 40,
       slider: { min: 0.05, max: 1.9, step: 0.05, init: 1.0 },
-      q:   x => ({ plus: [x, x], minus: [x, -x] }),
-      rho: x => Math.SQRT2 * x,
-      plusTex:  'f(x,x)-f(0,0)=2x^4',
-      minusTex: 'f(x,-x)-f(0,0)=2x^2(x+2)(x-2)',
-      card1: () =>
-        '<b>① 停留点を求める</b><br>' +
-        tex('f_x=4x^3-4(x-y),\\ f_y=4y^3+4(x-y)') + ' より，' +
-        tex('f_x=0') + ' かつ ' + tex('f_y=0') + ' は ' +
-        tex('x^3-(x-y)=0') + ' かつ ' + tex('y^3+(x-y)=0') + '.<br>' +
-        '両式を辺ごと加えると ' + tex('x^3+y^3=0') + ' より ' + tex('y=-x') + '（' + tex('x+y') + ' が消去できる）．' +
-        'これを代入して ' + tex('x=0,\\ \\pm\\sqrt{2}') + '.<br>' +
-        'よって ' + tex('(x,y)=(\\pm\\sqrt{2},\\mp\\sqrt{2}),\\ (0,0)') + '（複号同順）．' +
-        '赤・緑の曲線（' + tex('z=0') + ' 平面上の ' + tex('f_x=0,\\ f_y=0') + '）の交点が停留点．',
-      card2: () =>
-        '<b>② 各停留点で ' + tex('A,B,C') + '</b><br>' +
-        tex('f_{xx}=12x^2-4,\\ f_{xy}=-4,\\ f_{yy}=12y^2-4') + ' より，<br>' +
-        tex('(\\pm\\sqrt{2},\\mp\\sqrt{2})') + ' のとき ' + tex('A=20,\\ B=-4,\\ C=20,\\ B^2-AC=-384<0') +
-        '（' + tex('A>0') + ' なので極小）．<br>' +
-        tex('(0,0)') + ' のとき ' + tex('A=B=C=-4,\\ B^2-AC=0') + ' → このままでは判定できない．' +
-        '上のボタンで停留点を切り替えられる．',
-      card3: () =>
-        '<b>③ ' + tex('(0,0)') + ' を定義にもとづいて調べる</b><br>' +
-        '頼れる定理・公式がなくなったので，' + tex('f(x,y)-f(0,0)') + ' の符号を調べる（' + tex('f(0,0)=0') + '）．<br>' +
-        tex('y=x') + ' のとき ' + tex('f(x,x)-f(0,0)=2x^4>0') + '（' + tex('x\\ne0') + '）．<br>' +
-        tex('y=-x') + ' のとき ' + tex('f(x,-x)-f(0,0)=2x^2(x+2)(x-2)<0') + '（' + tex('|x|<2,\\ x\\ne0') + '）．<br>' +
-        '曲面は正の部分が青，負の部分が紫です．' + tex('x') + ' を小さくして円（近傍）を縮めても，円の内側に青と紫の両方が含まれる．',
-      verdict1: '停留点は 3 点．上のボタンで着目する点を選べる．',
-      verdict3:
-        '原点のどんな近傍にも，' + tex('f(x,y)-f(0,0)') + ' が正の点 ' + tex('Q_+') + ' と負の点 ' + tex('Q_-') +
-        ' があるので，<b>(0,0) で極値をとらない</b>．<br>' +
-        '以上より，求める極値は <b>極小値 ' + tex('f(\\pm\\sqrt{2},\\mp\\sqrt{2})=-8') + '</b>．'
+      qplus:  x => [x, x],
+      qminus: x => [x, -x],
+      rho:    x => Math.SQRT2 * x,
+      verdict1: '停留点は 3 点．上のボタンで着目する点を選択．',
+      steps: [
+        {
+          label: '① 停留点',
+          preset: { fx: true, fy: true },
+          ctrl: {},
+          card: () =>
+            '<b>① 停留点を求める</b><br>' +
+            tex('f_x=4x^3-4(x-y),\\ f_y=4y^3+4(x-y)') + ' より，' +
+            tex('f_x=0') + ' かつ ' + tex('f_y=0') + ' は ' +
+            tex('x^3-(x-y)=0') + ' かつ ' + tex('y^3+(x-y)=0') + '.<br>' +
+            '両式を辺ごと加えると ' + tex('x^3+y^3=0') + ' より ' + tex('y=-x') + '（' + tex('x+y') + ' が消去できる）．' +
+            'これを代入して ' + tex('x=0,\\ \\pm\\sqrt{2}') + '.<br>' +
+            'よって ' + tex('(x,y)=(\\pm\\sqrt{2},\\mp\\sqrt{2}),\\ (0,0)') + '（複号同順）．' +
+            '赤・緑の曲線（' + tex('z=0') + ' 平面上の ' + tex('f_x=0,\\ f_y=0') + '）の交点が停留点．',
+          readout: readoutStat
+        },
+        {
+          label: '② $A,B,C$',
+          preset: {},
+          ctrl: {},
+          card: () =>
+            '<b>② 各停留点で ' + tex('A,B,C') + '</b><br>' +
+            tex('f_{xx}=12x^2-4,\\ f_{xy}=-4,\\ f_{yy}=12y^2-4') + ' より，<br>' +
+            tex('(\\pm\\sqrt{2},\\mp\\sqrt{2})') + ' のとき ' + tex('A=20,\\ B=-4,\\ C=20,\\ B^2-AC=-384<0') +
+            '（' + tex('A>0') + ' なので極小）．<br>' +
+            tex('(0,0)') + ' のとき ' + tex('A=B=C=-4,\\ B^2-AC=0') + ' → このままでは判定できない．' +
+            '上のボタンで停留点を切り替え．',
+          readout: readoutABC
+        },
+        {
+          label: '③ $y=x$',
+          preset: { ref: true, sec: [true, false], qp: true, sign: 'both' },
+          ctrl: { x: true },
+          card: () =>
+            '<b>③ ' + tex('y=x') + ' の場合</b><br>' +
+            '頼れる定理・公式がなくなったので，定義にもとづいて ' + tex('(0,0)') + ' の近傍での ' + tex('f(x,y)-f(0,0)') + ' の符号を調べる（' + tex('f(0,0)=0') + '）．<br>' +
+            'そこでまず，' + tex('y=x') + ' とすると<br>' + tex('f(x,x)-f(0,0)=2x^4>0\\ (x\\ne0)') + '．<br>' +
+            'つまり ' + tex('x\\ne0') + ' なる ' + tex('x') + ' に対し ' + tex('f(x,x)-f(0,0)>0') + '．<br>' +
+            '平面 ' + tex('y=x') + ' 上の切り口（赤）は，原点で最小になる谷で，基準面より上にある．直線 ' + tex('y=x') + ' は青（正）だけで塗られている．',
+          plots: () => [{
+            tex: 'f(t,t)-f(0,0)=2t^4',
+            fn: t => CFG.f(t, t) - f0, color: '#f87171',
+            range: () => 1.6 * Math.max(state.x, 0.05), mark: state.x
+          }],
+          readout: () =>
+            '<div class="row">' + tex('x=' + fmt(state.x)) + '</div>' +
+            '<div class="row">' + tex('Q_+=(x,x):\\ f(x,x)-f(0,0)=2x^4=' + sci(CFG.f(state.x, state.x) - f0)) + badge('up', '正') + '</div>' +
+            '<div class="verdict">' + tex('y=x') + ' に沿うと，原点で <b>最小</b>（' + tex('x\\ne0') + ' で ' + tex('f>f(0,0)') + '）．</div>'
+        },
+        {
+          label: '④ $y=-x$',
+          preset: { ref: true, sec: [false, true], qm: true, sign: 'both' },
+          ctrl: { x: true },
+          card: () =>
+            '<b>④ ' + tex('y=-x') + ' の場合</b><br>' +
+            'また，' + tex('y=-x') + ' とすると<br>' + tex('f(x,-x)-f(0,0)=2x^4-8x^2=2x^2(x+2)(x-2)') + '．<br>' +
+            '特に ' + tex('|x|<2,\\ x\\ne0') + ' なる ' + tex('x') + ' に対し ' + tex('f(x,-x)-f(0,0)<0') + '．<br>' +
+            '平面 ' + tex('y=-x') + ' 上の切り口（緑）は，原点で最大になる山で，基準面より下にある．直線 ' + tex('y=-x') + ' は ' + tex('|x|<2') + ' の範囲で紫（負）．',
+          plots: () => [{
+            tex: 'f(t,-t)-f(0,0)=2t^2(t+2)(t-2)',
+            fn: t => CFG.f(t, -t) - f0, color: '#34d399',
+            range: () => 1.6 * Math.max(state.x, 0.05), mark: state.x
+          }],
+          readout: () =>
+            '<div class="row">' + tex('x=' + fmt(state.x)) + '</div>' +
+            '<div class="row">' + tex('Q_-=(x,-x):\\ f(x,-x)-f(0,0)=' + sci(CFG.f(state.x, -state.x) - f0)) +
+            (CFG.f(state.x, -state.x) - f0 < 0 ? badge('dn', '負') : badge('up', '正（' + '|x|>2' + '）')) + '</div>' +
+            '<div class="verdict">' + tex('y=-x') + ' に沿うと，' + tex('|x|<2') + ' の範囲で ' + tex('f<f(0,0)') + '．原点で <b>最大</b>．</div>'
+        },
+        {
+          label: '⑤ 近傍で判定',
+          preset: { zero: true, ref: true, sec: [true, true], qp: true, qm: true, circle: true, sign: 'both' },
+          ctrl: { x: true },
+          card: () =>
+            '<b>⑤ ' + tex('(0,0)') + ' の近傍でまとめる</b><br>' +
+            '③・④ は，' + tex('f(x,y)-f(0,0)') + ' の値が ' + tex('(0,0)') + ' のどんな近傍においても正にも負にもなることを意味する．<br>' +
+            '曲面の青（正）と紫（負）は，原点で接する．' + tex('x') + ' を小さくして円（近傍）を縮めたり，「原点の近くを拡大」で寄ったりしても，円の内側に青と紫の両方が残る．<br>' +
+            'よって ' + tex('f(x,y)') + ' は ' + tex('(0,0)') + ' で極値をとらない．',
+          plots: () => [
+            { tex: 'y=x:\\ f(t,t)-f(0,0)', fn: t => CFG.f(t, t) - f0, color: '#f87171',
+              range: () => 1.6 * Math.max(state.x, 0.05), mark: state.x },
+            { tex: 'y=-x:\\ f(t,-t)-f(0,0)', fn: t => CFG.f(t, -t) - f0, color: '#34d399',
+              range: () => 1.6 * Math.max(state.x, 0.05), mark: state.x }
+          ],
+          readout: () => {
+            const dp = CFG.f(state.x, state.x) - f0, dm = CFG.f(state.x, -state.x) - f0;
+            return '<div class="row">' + tex('x=' + fmt(state.x) + ',\\ \\rho=' + sci(CFG.rho(state.x))) + '（円の半径）</div>' +
+              '<div class="row">' + tex('Q_+:\\ f(x,x)-f(0,0)=' + sci(dp)) + badge('up', '正') + '</div>' +
+              '<div class="row">' + tex('Q_-:\\ f(x,-x)-f(0,0)=' + sci(dm)) + (dm < 0 ? badge('dn', '負') : badge('up', '正')) + '</div>' +
+              '<div class="verdict">原点のどんな近傍にも ' + tex('Q_+') + '（正）と ' + tex('Q_-') + '（負）があるので，<b>(0,0) で極値をとらない</b>．<br>' +
+              '以上より，求める極値は <b>極小値 ' + tex('f(\\pm\\sqrt{2},\\mp\\sqrt{2})=-8') + '</b>．</div>';
+          }
+        }
+      ]
     };
     const DOM = CFG.dom;
     const zs = CFG.zs;
@@ -397,18 +500,38 @@
     const P3 = (x, y, z) => new THREE.Vector3(x, zs * z, -y);
     const inDom = (x, y) => x >= DOM.x0 - 1e-9 && x <= DOM.x1 + 1e-9 && y >= DOM.y0 - 1e-9 && y <= DOM.y1 + 1e-9;
     const f0 = CFG.f(0, 0);
+    const NSEC = CFG.sections.length;
 
-    const PRESET = {
-      1: { fx: true,  fy: true,  zero: false, ref: false, paths: false, nbhd: false, sign: false },
-      2: { fx: false, fy: false, zero: false, ref: false, paths: false, nbhd: false, sign: false },
-      3: { fx: false, fy: false, zero: true,  ref: true,  paths: true,  nbhd: true,  sign: true  }
-    };
-    const state = {
-      step: 1,
-      sel: 0,
-      x: CFG.slider.init,
-      show: Object.assign({}, PRESET[1])
-    };
+    /* ---------- 共通の「計算結果」欄（① 停留点，② A,B,C） ---------- */
+    function readoutStat() {
+      const sp0 = CFG.stat[state.sel];
+      const fxv = CFG.fx(sp0.x, sp0.y), fyv = CFG.fy(sp0.x, sp0.y);
+      let h = '<div class="row">' + tex(CFG.allTex) + '</div>';
+      h += '<div class="row">' + tex('f_x' + sp0.coord + '=' + fmt(fxv) + ',\\ f_y' + sp0.coord + '=' + fmt(fyv)) +
+        badge('ok', '停留点') + '</div>';
+      h += '<div class="verdict">' + CFG.verdict1 + '</div>';
+      return h;
+    }
+    function readoutABC() {
+      const sp0 = CFG.stat[state.sel];
+      const A = CFG.fxx(sp0.x, sp0.y), B = CFG.fxy(sp0.x, sp0.y), C = CFG.fyy(sp0.x, sp0.y);
+      const D = B * B - A * C;
+      const sg = Math.abs(D) < 1e-9 ? '=0' : (D < 0 ? '<0' : '>0');
+      let h = '<div class="row">' + tex('(x,y)=' + sp0.coord) + '</div>';
+      h += '<div class="row">' + tex('A=' + fmt(A) + ',\\ B=' + fmt(B) + ',\\ C=' + fmt(C)) + '</div>';
+      h += '<div class="row">' + tex('B^2-AC=' + fmt(D) + '\\ (' + sg + ')') + '</div>';
+      let v = '';
+      if (Math.abs(D) < 1e-9) {
+        v = tex('B^2-AC=0') + ' なので，<b>このままでは判定できません</b>．③ 以降で定義にもとづいて調べる．';
+      } else if (D < 0 && A > 0) {
+        v = tex('A>0,\\ B^2-AC<0') + ' より，<b>極小値 ' + tex('f' + sp0.coord + '=' + fmt(CFG.f(sp0.x, sp0.y))) + '</b>';
+      } else if (D < 0 && A < 0) {
+        v = tex('A<0,\\ B^2-AC<0') + ' より，<b>極大値 ' + tex('f' + sp0.coord + '=' + fmt(CFG.f(sp0.x, sp0.y))) + '</b>';
+      } else {
+        v = tex('B^2-AC>0') + ' より，<b>極値ではない</b>．';
+      }
+      return h + '<div class="verdict">' + v + '</div>';
+    }
 
     /* ---------- Three.js 基本設定 ---------- */
     const container = document.getElementById('canvas-container');
@@ -417,9 +540,11 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121218);
 
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 100);
     const TARGET = new THREE.Vector3(CFG.cam.target[0], CFG.cam.target[1], CFG.cam.target[2]);
     camera.position.set(CFG.cam.pos[0], CFG.cam.pos[1], CFG.cam.pos[2]);
+    const BASE_DIST = camera.position.distanceTo(TARGET);
+    const ORIGIN3 = P3(0, 0, f0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -461,6 +586,7 @@
     const axisMat = new THREE.MeshBasicMaterial({
       color: 0xd1d5db, transparent: true, opacity: 0.9, depthTest: false
     });
+    const axisParts = [];
     function addAxis(dir, neg, pos) {
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
       const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, pos + neg, 12), axisMat);
@@ -473,13 +599,44 @@
       head.position.copy(dir.clone().multiplyScalar(pos + 0.13));
       head.renderOrder = 10;
       scene.add(head);
+      axisParts.push({ shaft, head, dir: dir.clone(), pos });
     }
     const AX = CFG.axes;
     addAxis(new THREE.Vector3(1, 0, 0), AX.x[0], AX.x[1]);
     addAxis(new THREE.Vector3(0, 0, -1), AX.y[0], AX.y[1]);
     addAxis(new THREE.Vector3(0, 1, 0), AX.z[0], AX.z[1]);
 
-    /* ---------- 曲面 S（z がしきい値を超える部分は描かない） ---------- */
+    /* ---------- 符号の色分けテクスチャ（解像度に依存しない境界） ---------- */
+    const texCache = {};
+    function getSignTex(mode, N, alpha) {
+      const key = mode + '/' + N + '/' + alpha;
+      if (texCache[key]) return texCache[key];
+      const cv = document.createElement('canvas');
+      cv.width = N; cv.height = N;
+      const ctx = cv.getContext('2d');
+      const img = ctx.createImageData(N, N);
+      const colPos = [59, 130, 246], colNeg = [168, 85, 247], colDim = [100, 116, 139];
+      for (let j = 0; j < N; j++) {
+        const y = DOM.y1 - (j + 0.5) / N * (DOM.y1 - DOM.y0);
+        for (let i = 0; i < N; i++) {
+          const x = DOM.x0 + (i + 0.5) / N * (DOM.x1 - DOM.x0);
+          const pos = CFG.f(x, y) - f0 > 0;
+          let c;
+          if (mode === 'neg') c = pos ? colDim : colNeg;
+          else if (mode === 'pos') c = pos ? colPos : colDim;
+          else c = pos ? colPos : colNeg;
+          const k = (j * N + i) * 4;
+          img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2]; img.data[k + 3] = alpha;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      const t = new THREE.CanvasTexture(cv);
+      t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      texCache[key] = t;
+      return t;
+    }
+
+    /* ---------- 曲面 S（z がしきい値を超える部分は平らに切る） ---------- */
     const SEG = 150;
     const surfGeo = new THREE.PlaneGeometry(1, 1, SEG, SEG);
     const sp = surfGeo.attributes.position;
@@ -503,31 +660,28 @@
     surfGeo.computeVertexNormals();
     sp.needsUpdate = true;
 
-    const colAttr = new THREE.BufferAttribute(new Float32Array(nV * 3), 3);
-    surfGeo.setAttribute('color', colAttr);
-    const cPos = new THREE.Color(0x3b82f6), cNeg = new THREE.Color(0xa855f7);
-    function applyColors() {
-      for (let i = 0; i < nV; i++) {
-        let c = cPos;
-        if (state.show.sign) {
-          const x = (fVal[i] - f0) / CFG.delta;
-          let t = Math.min(1, Math.max(0, (x + 1) / 2));
-          t = t * t * (3 - 2 * t);
-          c = cNeg.clone().lerp(cPos, t);
-        }
-        colAttr.setXYZ(i, c.r, c.g, c.b);
-      }
-      colAttr.needsUpdate = true;
-    }
-    scene.add(new THREE.Mesh(surfGeo, new THREE.MeshStandardMaterial({
-      vertexColors: true, side: THREE.DoubleSide, roughness: 0.3, metalness: 0.1,
+    const surfMat = new THREE.MeshStandardMaterial({
+      color: 0x3b82f6, side: THREE.DoubleSide, roughness: 0.3, metalness: 0.1,
       transparent: true, opacity: 0.78
-    })));
+    });
+    scene.add(new THREE.Mesh(surfGeo, surfMat));
     scene.add(new THREE.Mesh(surfGeo, new THREE.MeshBasicMaterial({
       color: 0x60a5fa, wireframe: true, transparent: true, opacity: 0.08
     })));
+    function applySurfaceMode() {
+      const mode = state.show.sign;
+      if (mode === 'off') {
+        surfMat.map = null;
+        surfMat.color.set(0x3b82f6);
+      } else {
+        surfMat.map = getSignTex(mode, 2048, 255);
+        surfMat.color.set(0xffffff);
+      }
+      surfMat.needsUpdate = true;
+    }
 
     /* ---------- 曲線（細いチューブ） ---------- */
+    const rk = () => Math.pow(state.zoom, -0.7);
     function makeTube(color, onTop) {
       const m = new THREE.Mesh(new THREE.BufferGeometry(),
         new THREE.MeshBasicMaterial({ color, transparent: !!onTop, opacity: onTop ? 0.95 : 1, depthTest: !onTop }));
@@ -538,8 +692,13 @@
       mesh.geometry.dispose();
       mesh.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, !!closed), Math.max(4, pts.length * 2), r, 8, !!closed);
     }
-    function buildCurveGroup(curves, color, r, zOf, valid, onTop) {
-      const g = new THREE.Group();
+    function disposeGroup(g) {
+      g.children.slice().forEach(o => {
+        if (o.geometry) o.geometry.dispose();
+        g.remove(o);
+      });
+    }
+    function buildCurveInto(g, curves, color, r, zOf, valid, onTop) {
       curves.forEach(c => {
         const n = c.n || 200;
         let run = [];
@@ -561,50 +720,123 @@
           g.add(m);
         });
       });
-      scene.add(g);
-      return g;
     }
     const zPlane = () => 0.012 / zs;
     const onPlane = (x, y) => inDom(x, y);
-    const onSurf = (x, y) => inDom(x, y) && CFG.f(x, y) <= CFG.zcap;
 
-    const fxGroup = buildCurveGroup(CFG.curvesFx, 0xef4444, 0.028, zPlane, onPlane, true);
-    const fyGroup = buildCurveGroup(CFG.curvesFy, 0x10b981, 0.028, zPlane, onPlane, true);
-    const zeroGroup = buildCurveGroup(CFG.curvesZero, 0xf3f4f6, 0.03, zPlane, onPlane, true);
-    const pathPlus = buildCurveGroup([CFG.paths[0]], 0xf87171, 0.03, (x, y) => CFG.f(x, y), onSurf);
-    const pathMinus = buildCurveGroup([CFG.paths[1]], 0x34d399, 0.03, (x, y) => CFG.f(x, y), onSurf);
-
-    /* ---------- 基準面 z = f(0,0) ---------- */
-    function makeSignTexture() {
-      const N = 512;
-      const cv = document.createElement('canvas');
-      cv.width = N; cv.height = N;
-      const ctx = cv.getContext('2d');
-      const img = ctx.createImageData(N, N);
-      for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
-          const x = DOM.x0 + (i + 0.5) / N * (DOM.x1 - DOM.x0);
-          const y = DOM.y1 - (j + 0.5) / N * (DOM.y1 - DOM.y0);
-          const pos = CFG.f(x, y) - f0 > 0;
-          const k = (j * N + i) * 4;
-          img.data[k] = pos ? 59 : 168;
-          img.data[k + 1] = pos ? 130 : 85;
-          img.data[k + 2] = pos ? 246 : 247;
-          img.data[k + 3] = 95;
-        }
-      }
-      ctx.putImageData(img, 0, 0);
-      return new THREE.CanvasTexture(cv);
+    const fxGroup = new THREE.Group(), fyGroup = new THREE.Group(), zeroGroup = new THREE.Group();
+    scene.add(fxGroup); scene.add(fyGroup); scene.add(zeroGroup);
+    function buildStaticTubes() {
+      disposeGroup(fxGroup); disposeGroup(fyGroup); disposeGroup(zeroGroup);
+      buildCurveInto(fxGroup, CFG.curvesFx, 0xef4444, 0.028 * rk(), zPlane, onPlane, true);
+      buildCurveInto(fyGroup, CFG.curvesFy, 0x10b981, 0.028 * rk(), zPlane, onPlane, true);
+      buildCurveInto(zeroGroup, CFG.curvesZero, 0xf3f4f6, 0.03 * rk(), zPlane, onPlane, true);
     }
+
+    /* ---------- 原点を通る直線に沿った切り口（縦断面・曲線・符号つきの直線） ---------- */
+    function directionRange(c, s) {
+      let lo = -1e9, hi = 1e9;
+      [[0, c], [0, s]].forEach((pd, k) => {
+        const d = pd[1];
+        const a0 = k === 0 ? DOM.x0 : DOM.y0, a1 = k === 0 ? DOM.x1 : DOM.y1;
+        if (Math.abs(d) > 1e-9) {
+          const t1 = a0 / d, t2 = a1 / d;
+          lo = Math.max(lo, Math.min(t1, t2));
+          hi = Math.min(hi, Math.max(t1, t2));
+        }
+      });
+      return [lo, hi];
+    }
+    const secObjs = CFG.sections.map(sc => {
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({ color: sc.color, side: THREE.DoubleSide, transparent: true, opacity: 0.11, depthWrite: false })
+      );
+      scene.add(plane);
+      const group = new THREE.Group();
+      scene.add(group);
+      return { sc, plane, group, endPos: new THREE.Vector3() };
+    });
+    function secAngle(o) {
+      return (o.sc.ang === null) ? state.phiDeg * Math.PI / 180 : o.sc.ang;
+    }
+    function buildSection(o) {
+      disposeGroup(o.group);
+      const ang = secAngle(o);
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const rng = directionRange(c, s);
+      const tlo = rng[0], thi = rng[1];
+      const h = CFG.zhi - CFG.zlo;
+      o.plane.position.set(c * (tlo + thi) / 2, zs * (CFG.zlo + CFG.zhi) / 2, -s * (tlo + thi) / 2);
+      o.plane.rotation.set(0, ang, 0);
+      o.plane.scale.set(thi - tlo, zs * h, 1);
+
+      // 曲面上の曲線
+      const N = 500;
+      let run = [];
+      const runs = [];
+      for (let i = 0; i <= N; i++) {
+        const t = tlo + (thi - tlo) * i / N;
+        const x = t * c, y = t * s;
+        const fv = CFG.f(x, y);
+        if (fv <= CFG.zcap) run.push(P3(x, y, fv));
+        else { if (run.length > 1) runs.push(run); run = []; }
+      }
+      if (run.length > 1) runs.push(run);
+      runs.forEach(rn => {
+        const m = makeTube(o.sc.color, false);
+        setTube(m, rn, 0.03 * rk(), false);
+        o.group.add(m);
+      });
+
+      // xy 平面上の直線を，f-f(0,0) の符号（青：正，紫：負）で塗り分ける
+      let cur = [];
+      let curSign = null;
+      const sRuns = [];
+      for (let i = 0; i <= N; i++) {
+        const t = tlo + (thi - tlo) * i / N;
+        const x = t * c, y = t * s;
+        const sg = (CFG.f(x, y) - f0) > 0;
+        const pt = P3(x, y, zPlane());
+        if (curSign === null || sg === curSign) {
+          cur.push(pt);
+        } else {
+          cur.push(pt);
+          sRuns.push({ pts: cur, pos: curSign });
+          cur = [pt];
+        }
+        curSign = sg;
+      }
+      if (cur.length > 1) sRuns.push({ pts: cur, pos: curSign });
+      sRuns.forEach(r => {
+        if (r.pts.length < 2) return;
+        const m = makeTube(r.pos ? 0x60a5fa : 0xc084fc, true);
+        setTube(m, r.pts, 0.036 * rk(), false);
+        o.group.add(m);
+      });
+
+      // ラベルの位置
+      if (o.sc.at) {
+        o.endPos.copy(P3(o.sc.at[0], o.sc.at[1], Math.min(CFG.f(o.sc.at[0], o.sc.at[1]), CFG.zcap)));
+      } else {
+        const tt = (thi > -tlo) ? thi : tlo;
+        const x = tt * c, y = tt * s;
+        o.endPos.copy(P3(x, y, Math.min(CFG.f(x, y), CFG.zcap)));
+      }
+      o.endPos.y += 0.3;
+    }
+
+    /* ---------- 領域図（基準面 z = f(0,0) に符号の領域を敷く） ---------- */
     const refMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(DOM.x1 - DOM.x0, DOM.y1 - DOM.y0),
-      new THREE.MeshBasicMaterial({ map: makeSignTexture(), transparent: true, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false })
     );
+    refMesh.material.map = getSignTex('both', 1024, 95);
     refMesh.rotation.x = -Math.PI / 2;
     refMesh.position.set((DOM.x0 + DOM.x1) / 2, zs * f0, -(DOM.y0 + DOM.y1) / 2);
     scene.add(refMesh);
 
-    /* ---------- 停留点 ---------- */
+    /* ---------- 停留点・点 Q+, Q-・近傍の円 ---------- */
     const statMeshes = [];
     CFG.stat.forEach(s => {
       const z = CFG.f(s.x, s.y);
@@ -616,13 +848,11 @@
       scene.add(m);
       statMeshes.push(m);
       if (Math.abs(z - f0) > 1e-9) {
-        const t = makeTube(0x9ca3af);
+        const t = makeTube(0x9ca3af, false);
         setTube(t, [P3(s.x, s.y, f0), P3(s.x, s.y, z)], 0.012, false);
         scene.add(t);
       }
     });
-
-    /* ---------- 近傍の円と点 Q+, Q- ---------- */
     const circleMesh = makeTube(0xfde68a, true);
     scene.add(circleMesh);
     const qPlus = new THREE.Mesh(new THREE.SphereGeometry(0.085, 24, 24), new THREE.MeshBasicMaterial({ color: 0xf87171 }));
@@ -632,36 +862,36 @@
 
     /* ---------- 3D ラベル ---------- */
     const labels = [];
-    function addLabel(html, cls, pos, group) {
+    function addLabel(html, cls, pos, test) {
       const div = document.createElement('div');
       div.className = 'latex-label' + (cls ? ' ' + cls : '');
       div.innerHTML = html;
       labelsContainer.appendChild(div);
-      const l = { el: div, pos: pos, group: group };
+      const l = { el: div, pos: pos, test: test };
       labels.push(l);
       return l;
     }
-    addLabel(tex('x'), 'axis', new THREE.Vector3(AX.x[1] + 0.65, 0, 0), 'always');
-    addLabel(tex('y'), 'axis', new THREE.Vector3(0, 0, -(AX.y[1] + 0.65)), 'always');
-    addLabel(tex('z'), 'axis', new THREE.Vector3(0, AX.z[1] + 0.7, 0), 'always');
-    addLabel(tex('O'), 'axis', new THREE.Vector3(-0.22, -0.22, 0.22), 'always');
+    const always = () => true;
+    addLabel(tex('x'), 'axis', new THREE.Vector3(AX.x[1] + 0.65, 0, 0), always);
+    addLabel(tex('y'), 'axis', new THREE.Vector3(0, 0, -(AX.y[1] + 0.65)), always);
+    addLabel(tex('z'), 'axis', new THREE.Vector3(0, AX.z[1] + 0.7, 0), always);
+    addLabel(tex('O'), 'axis', new THREE.Vector3(-0.22, -0.22, 0.22), always);
 
     CFG.stat.forEach(s => {
-      addLabel(tex(s.lab), '', P3(s.x, s.y, CFG.f(s.x, s.y)).add(new THREE.Vector3(0, 0.38, 0)), 'always');
+      addLabel(tex(s.lab), '', P3(s.x, s.y, CFG.f(s.x, s.y)).add(new THREE.Vector3(0, 0.38, 0)), always);
     });
-    (CFG.lab.fx || []).forEach(a => addLabel(tex(a[2]), '', P3(a[0], a[1], 0), 'fx'));
-    (CFG.lab.fy || []).forEach(a => addLabel(tex(a[2]), '', P3(a[0], a[1], 0), 'fy'));
-    (CFG.lab.zero || []).forEach(a => addLabel(tex(a[2]), '', P3(a[0], a[1], 0), 'zero'));
-    addLabel('基準面 ' + tex('z=f(0,0)') + '（符号の領域図）', '', P3(CFG.lab.ref[0], CFG.lab.ref[1], f0), 'ref');
-    CFG.paths.forEach(p => addLabel(tex(p.lab), '', P3(p.at[0], p.at[1], Math.min(CFG.f(p.at[0], p.at[1]), CFG.zcap)).add(new THREE.Vector3(0, 0.25, 0)), 'paths'));
-    const labQp = addLabel(tex('Q_+'), '', new THREE.Vector3(), 'nbhd');
-    const labQm = addLabel(tex('Q_-'), '', new THREE.Vector3(), 'nbhd');
+    (CFG.lab.fx || []).forEach(a => addLabel(tex(a[2]), '', P3(a[0], a[1], 0), () => state.show.fx));
+    (CFG.lab.fy || []).forEach(a => addLabel(tex(a[2]), '', P3(a[0], a[1], 0), () => state.show.fy));
+    (CFG.lab.zero || []).forEach(a => addLabel(tex(a[2]), '', P3(a[0], a[1], 0), () => state.show.zero));
+    addLabel('領域図 ' + tex('z=f(0,0)'), '', P3(CFG.lab.ref[0], CFG.lab.ref[1], f0), () => state.show.ref);
+    const secLabels = secObjs.map((o, k) => addLabel(tex(o.sc.lab), '', o.endPos, () => state.show.sec[k]));
+    const labQp = addLabel(tex('Q_+'), '', new THREE.Vector3(), () => state.show.qp);
+    const labQm = addLabel(tex('Q_-'), '', new THREE.Vector3(), () => state.show.qm);
 
     const tempV = new THREE.Vector3();
     function updateLabelsPosition() {
       labels.forEach(l => {
-        const visible = l.group === 'always' || state.show[l.group];
-        if (!visible) { l.el.style.opacity = '0'; return; }
+        if (!l.test()) { l.el.style.opacity = '0'; return; }
         tempV.copy(l.pos).project(camera);
         if (tempV.z > 1) { l.el.style.opacity = '0'; return; }
         const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
@@ -673,107 +903,197 @@
 
     /* ---------- シーン更新 ---------- */
     function updateScene() {
-      const q = CFG.q(state.x);
+      const qp = CFG.qplus(state.x), qm = CFG.qminus(state.x);
       const rho = CFG.rho(state.x);
-      qPlus.position.copy(P3(q.plus[0], q.plus[1], CFG.f(q.plus[0], q.plus[1])));
-      qMinus.position.copy(P3(q.minus[0], q.minus[1], CFG.f(q.minus[0], q.minus[1])));
-      labQp.pos.copy(qPlus.position).add(new THREE.Vector3(0, 0.3, 0));
-      labQm.pos.copy(qMinus.position).add(new THREE.Vector3(0, 0.3, 0));
+      qPlus.position.copy(P3(qp[0], qp[1], CFG.f(qp[0], qp[1])));
+      qMinus.position.copy(P3(qm[0], qm[1], CFG.f(qm[0], qm[1])));
+      labQp.pos.copy(qPlus.position).add(new THREE.Vector3(0, 0.3 * rk(), 0));
+      labQm.pos.copy(qMinus.position).add(new THREE.Vector3(0, 0.3 * rk(), 0));
       const pts = [];
       for (let i = 0; i < 96; i++) {
         const t = 2 * Math.PI * i / 96;
         pts.push(P3(rho * Math.cos(t), rho * Math.sin(t), zPlane()));
       }
-      setTube(circleMesh, pts, 0.02, true);
+      setTube(circleMesh, pts, 0.02 * rk(), true);
 
       fxGroup.visible = state.show.fx;
       fyGroup.visible = state.show.fy;
       zeroGroup.visible = state.show.zero;
       refMesh.visible = state.show.ref;
-      pathPlus.visible = state.show.paths;
-      pathMinus.visible = state.show.paths;
-      circleMesh.visible = state.show.nbhd;
-      qPlus.visible = state.show.nbhd;
-      qMinus.visible = state.show.nbhd;
+      secObjs.forEach((o, k) => { o.plane.visible = !!state.show.sec[k]; o.group.visible = !!state.show.sec[k]; });
+      circleMesh.visible = state.show.circle;
+      qPlus.visible = state.show.qp;
+      qMinus.visible = state.show.qm;
+      qPlus.scale.setScalar(rk());
+      qMinus.scale.setScalar(rk());
 
       statMeshes.forEach((m, i) => {
         const on = (i === state.sel) || CFG.stat.length === 1;
-        m.scale.setScalar(on ? 1.35 : 0.9);
+        m.scale.setScalar((on ? 1.35 : 0.9) * rk());
         m.material.color.set(on ? 0xffffff : 0x9ca3af);
       });
     }
 
-    /* ---------- パネルの表示（解説・計算結果） ---------- */
-    function renderStepCard() {
-      const card = document.getElementById('step-card');
-      card.innerHTML = state.step === 1 ? CFG.card1() : (state.step === 2 ? CFG.card2() : CFG.card3());
+    /* ---------- 拡大（原点の近くへ寄る） ---------- */
+    function scaleAxes() {
+      const k = rk();
+      axisParts.forEach(a => {
+        a.shaft.scale.set(k, 1, k);
+        a.head.scale.set(k, k, k);
+        a.head.position.copy(a.dir.clone().multiplyScalar(a.pos + 0.13 * k));
+      });
+    }
+    function applyZoom() {
+      const dirNow = camera.position.clone().sub(controls.target).normalize();
+      const tgt = TARGET.clone().lerp(ORIGIN3, 1 - 1 / state.zoom);
+      controls.target.copy(tgt);
+      camera.position.copy(tgt).add(dirNow.multiplyScalar(BASE_DIST / state.zoom));
+      controls.update();
+      scaleAxes();
+      buildStaticTubes();
+      secObjs.forEach(buildSection);
+      updateScene();
     }
 
-    function badge(cls, text) { return '<span class="badge ' + cls + '">' + text + '</span>'; }
+    /* ---------- パネル：ステップ・カード・小グラフ・計算結果 ---------- */
+    const stepGroup = document.getElementById('step-group');
+    CFG.steps.forEach((st, i) => {
+      const b = document.createElement('button');
+      b.className = 'step-btn';
+      b.id = 'step-' + i;
+      b.innerHTML = st.label.replace(/\$([^$]+)\$/g, (m, g) => tex(g));
+      b.addEventListener('click', () => setStep(i));
+      stepGroup.appendChild(b);
+    });
+
+    function renderStepCard() {
+      document.getElementById('step-card').innerHTML = CFG.steps[state.step].card();
+    }
+
+    function drawPlot(canvas, spec) {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const W = canvas.clientWidth || 330, H = 84;
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      const T = spec.range();
+      const N = 320;
+      const ts = [], ys = [];
+      let ymin = 0, ymax = 0;
+      for (let i = 0; i <= N; i++) {
+        const t = -T + 2 * T * i / N;
+        const y = spec.fn(t);
+        ts.push(t); ys.push(y);
+        if (y < ymin) ymin = y;
+        if (y > ymax) ymax = y;
+      }
+      if (ymax - ymin < 1e-15) { ymax = 1e-15; ymin = -1e-15; }
+      if (ymin < -1e-12) ymax = Math.min(ymax, -ymin * 4);
+      const pad = (ymax - ymin) * 0.12;
+      ymin -= pad; ymax += pad;
+      const X = t => (t + T) / (2 * T) * W;
+      const Y = y => H - (y - ymin) / (ymax - ymin) * H;
+      const y0 = Y(0);
+      // 符号で塗り分け
+      for (let i = 0; i < N; i++) {
+        const avg = (ys[i] + ys[i + 1]) / 2;
+        ctx.fillStyle = avg > 0 ? 'rgba(59,130,246,0.40)' : 'rgba(168,85,247,0.40)';
+        ctx.beginPath();
+        ctx.moveTo(X(ts[i]), y0);
+        ctx.lineTo(X(ts[i]), Y(ys[i]));
+        ctx.lineTo(X(ts[i + 1]), Y(ys[i + 1]));
+        ctx.lineTo(X(ts[i + 1]), y0);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // 軸（t=0 の縦線と y=0 の横線）
+      ctx.strokeStyle = 'rgba(209,213,219,0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(W, y0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(X(0), 0); ctx.lineTo(X(0), H); ctx.stroke();
+      // 曲線
+      ctx.strokeStyle = spec.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i <= N; i++) {
+        if (i === 0) ctx.moveTo(X(ts[i]), Y(ys[i])); else ctx.lineTo(X(ts[i]), Y(ys[i]));
+      }
+      ctx.stroke();
+      // 現在の点
+      if (spec.mark !== undefined && spec.mark !== null && Math.abs(spec.mark) <= T) {
+        const my = spec.fn(spec.mark);
+        ctx.fillStyle = spec.color;
+        ctx.beginPath(); ctx.arc(X(spec.mark), Y(my), 4, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(X(spec.mark), Y(my), 4, 0, 2 * Math.PI); ctx.stroke();
+      }
+    }
+    function renderPlots() {
+      const box = document.getElementById('plots');
+      const st = CFG.steps[state.step];
+      const specs = st.plots ? st.plots() : [];
+      box.innerHTML = '';
+      specs.forEach(sp => {
+        const t = document.createElement('div');
+        t.className = 'plot-title';
+        t.innerHTML = tex(sp.tex);
+        box.appendChild(t);
+        const cv = document.createElement('canvas');
+        cv.className = 'plot-canvas';
+        box.appendChild(cv);
+        drawPlot(cv, sp);
+      });
+      if (specs.length) {
+        const n = document.createElement('div');
+        n.className = 'plot-note';
+        n.innerHTML = '横軸 ' + tex('t') + '（原点が中央）と縦軸は，この図だけ自動で調整されます（負の部分が見えるよう，上側は切ることがあります）．青：正，紫：負．';
+        box.appendChild(n);
+      }
+    }
 
     function renderReadout() {
-      const s = CFG.stat[state.sel];
-      const x0 = s.x, y0 = s.y;
-      let h = '';
-      if (state.step === 1) {
-        const fxv = CFG.fx(x0, y0), fyv = CFG.fy(x0, y0);
-        h += '<div class="row">' + tex(CFG.allTex) + '</div>';
-        h += '<div class="row">' + tex('f_x' + s.coord + '=' + fmt(fxv) + ',\\ f_y' + s.coord + '=' + fmt(fyv)) +
-          badge('ok', '停留点') + '</div>';
-        h += '<div class="verdict">' + CFG.verdict1 + '</div>';
-      } else if (state.step === 2) {
-        const A = CFG.fxx(x0, y0), B = CFG.fxy(x0, y0), C = CFG.fyy(x0, y0);
-        const D = B * B - A * C;
-        const sg = Math.abs(D) < 1e-9 ? '=0' : (D < 0 ? '<0' : '>0');
-        h += '<div class="row">' + tex('(x,y)=' + s.coord) + '</div>';
-        h += '<div class="row">' + tex('A=' + fmt(A) + ',\\ B=' + fmt(B) + ',\\ C=' + fmt(C)) + '</div>';
-        h += '<div class="row">' + tex('B^2-AC=' + fmt(D) + '\\ (' + sg + ')') + '</div>';
-        let v = '';
-        if (Math.abs(D) < 1e-9) {
-          v = tex('B^2-AC=0') + ' なので，<b>このままでは判定できません</b>．③ で定義にもとづいて調べます．';
-        } else if (D < 0 && A > 0) {
-          v = tex('A>0,\\ B^2-AC<0') + ' より，<b>極小値 ' + tex('f' + s.coord + '=' + fmt(CFG.f(x0, y0))) + '</b>';
-        } else if (D < 0 && A < 0) {
-          v = tex('A<0,\\ B^2-AC<0') + ' より，<b>極大値 ' + tex('f' + s.coord + '=' + fmt(CFG.f(x0, y0))) + '</b>';
-        } else {
-          v = tex('B^2-AC>0') + ' より，<b>極値ではない</b>．';
-        }
-        h += '<div class="verdict">' + v + '</div>';
-      } else {
-        const q = CFG.q(state.x);
-        const dp = CFG.f(q.plus[0], q.plus[1]) - f0;
-        const dm = CFG.f(q.minus[0], q.minus[1]) - f0;
-        h += '<div class="row">' + tex('x=' + fmt(state.x) + ',\\ \\rho=' + sci(CFG.rho(state.x))) + '（円の半径）</div>';
-        h += '<div class="row">' + tex('Q_+:\\ ' + CFG.plusTex + '=' + sci(dp)) + badge('up', '正') + '</div>';
-        h += '<div class="row">' + tex('Q_-:\\ ' + CFG.minusTex + '=' + sci(dm)) + badge('dn', '負') + '</div>';
-        h += '<div class="verdict">' + CFG.verdict3 + '</div>';
-      }
-      document.getElementById('readout').innerHTML = h;
+      document.getElementById('readout').innerHTML = CFG.steps[state.step].readout();
     }
 
     function syncButtons() {
-      ['fx', 'fy', 'zero', 'ref', 'paths', 'nbhd', 'sign'].forEach(k => {
-        document.getElementById('btn-' + k).classList.toggle('active', !!state.show[k]);
-      });
-      [1, 2, 3].forEach(i => document.getElementById('step-' + i).classList.toggle('active', state.step === i));
+      const sh = state.show;
+      document.getElementById('btn-fx').classList.toggle('active', !!sh.fx);
+      document.getElementById('btn-fy').classList.toggle('active', !!sh.fy);
+      document.getElementById('btn-zero').classList.toggle('active', !!sh.zero);
+      document.getElementById('btn-ref').classList.toggle('active', !!sh.ref);
+      document.getElementById('btn-sec').classList.toggle('active', sh.sec.some(v => v));
+      document.getElementById('btn-q').classList.toggle('active', !!(sh.qp || sh.qm || sh.circle));
+      document.getElementById('btn-sign').classList.toggle('active', sh.sign !== 'off');
+      CFG.steps.forEach((st, i) => document.getElementById('step-' + i).classList.toggle('active', state.step === i));
       document.querySelectorAll('#stat-group .step-btn').forEach((b, i) => b.classList.toggle('active', i === state.sel));
       document.getElementById('val-x').innerHTML = tex(fmt(state.x));
+      document.getElementById('val-phi').innerHTML = tex(state.phiDeg + '^\\circ');
+      document.getElementById('val-zoom').innerHTML = tex('\\times' + (Math.round(state.zoom * 10) / 10));
+      const c = CFG.steps[state.step].ctrl || {};
+      document.getElementById('grp-x').style.display = c.x ? '' : 'none';
+      document.getElementById('stat-wrap').style.display = (CFG.stat.length > 1 && state.step <= 1) ? '' : 'none';
+      document.getElementById('grp-phi').style.display = (CFG.hasPhi && c.phi) ? '' : 'none';
     }
     function refresh() {
       updateScene();
       renderStepCard();
+      renderPlots();
       renderReadout();
       syncButtons();
     }
 
     function setStep(n) {
       state.step = n;
-      Object.assign(state.show, PRESET[n]);
-      if (n === 3) {
+      const p = CFG.steps[n].preset;
+      state.show.fx = !!p.fx; state.show.fy = !!p.fy; state.show.zero = !!p.zero; state.show.ref = !!p.ref;
+      state.show.qp = !!p.qp; state.show.qm = !!p.qm; state.show.circle = !!p.circle;
+      state.show.sign = p.sign || 'off';
+      state.show.sec = secObjs.map((o, k) => !!(p.sec && p.sec[k]));
+      if (n >= 2) {
         const o = CFG.stat.findIndex(s => s.x === 0 && s.y === 0);
         if (o >= 0) state.sel = o;
       }
-      applyColors();
+      applySurfaceMode();
       refresh();
     }
 
@@ -787,25 +1107,41 @@
         b.addEventListener('click', () => { state.sel = i; refresh(); });
         statGroup.appendChild(b);
       });
-    } else {
-      document.getElementById('stat-wrap').style.display = 'none';
     }
 
     /* ---------- イベント ---------- */
-    [1, 2, 3].forEach(i => document.getElementById('step-' + i).addEventListener('click', () => setStep(i)));
     document.getElementById('slider-x').addEventListener('input', e => {
       state.x = parseFloat(e.target.value);
       refresh();
     });
-    ['fx', 'fy', 'zero', 'ref', 'paths', 'nbhd'].forEach(k => {
-      document.getElementById('btn-' + k).addEventListener('click', () => {
-        state.show[k] = !state.show[k];
-        refresh();
-      });
+    document.getElementById('slider-phi').addEventListener('input', e => {
+      state.phiDeg = parseInt(e.target.value, 10);
+      secObjs.forEach(o => { if (o.sc.ang === null) buildSection(o); });
+      refresh();
+    });
+    document.getElementById('slider-zoom').addEventListener('input', e => {
+      state.zoomV = parseFloat(e.target.value);
+      state.zoom = Math.pow(12, state.zoomV / 100);
+      applyZoom();
+      refresh();
+    });
+    document.getElementById('btn-fx').addEventListener('click', () => { state.show.fx = !state.show.fx; refresh(); });
+    document.getElementById('btn-fy').addEventListener('click', () => { state.show.fy = !state.show.fy; refresh(); });
+    document.getElementById('btn-zero').addEventListener('click', () => { state.show.zero = !state.show.zero; refresh(); });
+    document.getElementById('btn-ref').addEventListener('click', () => { state.show.ref = !state.show.ref; refresh(); });
+    document.getElementById('btn-sec').addEventListener('click', () => {
+      const any = state.show.sec.some(v => v);
+      state.show.sec = state.show.sec.map(() => !any);
+      refresh();
+    });
+    document.getElementById('btn-q').addEventListener('click', () => {
+      const any = state.show.qp || state.show.qm || state.show.circle;
+      state.show.qp = state.show.qm = state.show.circle = !any;
+      refresh();
     });
     document.getElementById('btn-sign').addEventListener('click', () => {
-      state.show.sign = !state.show.sign;
-      applyColors();
+      state.show.sign = (state.show.sign === 'off') ? 'both' : 'off';
+      applySurfaceMode();
       refresh();
     });
 
@@ -813,10 +1149,13 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       applyViewOffset();
       renderer.setSize(window.innerWidth, window.innerHeight);
+      renderPlots();
     });
 
     /* ---------- 開始 ---------- */
-    setStep(1);
+    buildStaticTubes();
+    secObjs.forEach(buildSection);
+    setStep(0);
 
     function animate() {
       requestAnimationFrame(animate);
